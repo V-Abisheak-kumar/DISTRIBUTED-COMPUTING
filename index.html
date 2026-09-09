@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bully Algorithm — Distributed Leader Election Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0A0C10;
+    --panel: #12151B;
+    --panel-2: #161A21;
+    --border: #232833;
+    --border-soft: #1B2028;
+    --text: #E4E7EC;
+    --muted: #7C8494;
+    --muted-2: #565E6C;
+    --gold: #E7A83C;
+    --blue: #4C8DFF;
+    --green: #3FBF7F;
+    --red: #E0574A;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html,body{
+    margin:0;
+    padding:0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body{
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(76,141,255,0.06), transparent 40%),
+      radial-gradient(circle at 85% 100%, rgba(231,168,60,0.05), transparent 40%);
+  }
+
+  .wrap{
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* ---------- Header ---------- */
+  header{
+    margin-bottom: 36px;
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 32px;
+  }
+
+  .kicker{
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    margin-bottom: 14px;
+  }
+  .kicker span{ color: var(--blue); }
+
+  h1{
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.15;
+    font-weight: 600;
+    margin: 0 0 14px;
+    max-width: 780px;
+    letter-spacing: -0.01em;
+  }
+
+  header p{
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--muted);
+    max-width: 640px;
+    margin: 0;
+  }
+
+  /* ---------- Simulation card ---------- */
+  .sim-card{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 0;
+    margin-bottom: 22px;
+  }
+
+  .sim-status{
+    display:flex;
+    flex-wrap: wrap;
+    align-items:center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-soft);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+
+  .status-left{ display:flex; align-items:center; gap: 20px; flex-wrap: wrap;}
+
+  .status-item{ display:flex; align-items:center; gap:8px; color: var(--muted); }
+  .status-item b{ color: var(--text); font-weight: 500; }
+
+  .dot{ width:7px; height:7px; border-radius:50%; display:inline-block; flex-shrink:0; }
+  .dot.gold{ background: var(--gold); box-shadow: 0 0 8px rgba(231,168,60,0.7); }
+  .dot.green{ background: var(--green); }
+
+  #busyFlag{
+    color: var(--blue);
+    opacity: 0;
+    transition: opacity .2s ease;
+  }
+  #busyFlag.on{ opacity: 1; }
+
+  canvas{
+    display:block;
+    width: 100%;
+    height: 420px;
+    cursor: pointer;
+  }
+
+  .hint{
+    padding: 10px 20px 18px;
+    font-size: 13px;
+    color: var(--muted-2);
+  }
+
+  /* ---------- Controls ---------- */
+  .controls{
+    display:flex;
+    flex-wrap: wrap;
+    align-items:center;
+    gap: 12px;
+    padding: 16px 20px 20px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  button{
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 9px 16px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  button:hover:not(:disabled){ border-color: var(--muted-2); background: #1B2028; }
+  button:active:not(:disabled){ transform: translateY(1px); }
+  button:disabled{ opacity: 0.4; cursor: not-allowed; }
+
+  button.primary{ border-color: rgba(224,87,74,0.4); color: #F2A79E; }
+  button.primary:hover:not(:disabled){ background: rgba(224,87,74,0.08); border-color: var(--red); }
+
+  button.ghost{ color: var(--muted); }
+
+  .speed-group{
+    margin-left: auto;
+    display:flex;
+    align-items:center;
+    gap: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  select{
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 7px 10px;
+  }
+
+  /* ---------- Lower grid ---------- */
+  .grid{
+    display:grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 22px;
+  }
+  @media (max-width: 860px){
+    .grid{ grid-template-columns: 1fr; }
+  }
+
+  .panel{
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+
+  .panel h2{
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+    margin: 0;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text);
+  }
+
+  /* Log */
+  #log{
+    height: 300px;
+    overflow-y: auto;
+    padding: 14px 18px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.9;
+  }
+  #log::-webkit-scrollbar{ width: 8px; }
+  #log::-webkit-scrollbar-thumb{ background: var(--border); }
+
+  .log-line{ white-space: pre-wrap; word-break: break-word; }
+  .log-line .t{ color: var(--muted-2); }
+  .log-line.election .m{ color: var(--blue); }
+  .log-line.ok .m{ color: var(--green); }
+  .log-line.coordinator .m{ color: var(--gold); }
+  .log-line.fail .m{ color: var(--red); }
+  .log-line.info .m{ color: var(--muted); }
+
+  /* Rules */
+  .rules{ padding: 16px 18px 18px; font-size: 14px; line-height: 1.65; color: var(--muted); }
+  .rules ol{ margin: 0; padding-left: 20px; }
+  .rules li{ margin-bottom: 12px; }
+  .rules li b{ color: var(--text); font-weight: 500; }
+  .rules li:last-child{ margin-bottom: 0; }
+
+  .legend{
+    display:flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--border-soft);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .legend-item{ display:flex; align-items:center; gap:7px; }
+  .swatch{ width: 10px; height: 10px; flex-shrink:0; }
+
+  footer{
+    margin-top: 40px;
+    font-size: 12.5px;
+    color: var(--muted-2);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="kicker">DISTRIBUTED&nbsp;SYSTEMS&nbsp;LAB <span>/</span> LEADER ELECTION</div>
+    <h1>The Bully Algorithm</h1>
+    <p>Six nodes, one coordinator. Fail the leader and watch the cluster figure out — one message at a time — who takes over. In this algorithm, the highest surviving ID always wins the argument.</p>
+  </header>
+
+  <div class="sim-card">
+    <div class="sim-status">
+      <div class="status-left">
+        <div class="status-item"><span class="dot gold"></span> Coordinator: <b id="coordLabel">—</b></div>
+        <div class="status-item"><span class="dot green"></span> Nodes online: <b id="aliveLabel">—</b></div>
+      </div>
+      <div id="busyFlag">election in progress…</div>
+    </div>
+
+    <canvas id="stage"></canvas>
+
+    <div class="hint">Click a node to take it offline or bring it back online. Click the coordinator to force a failover.</div>
+
+    <div class="controls">
+      <button class="primary" id="failCoordBtn">Fail the coordinator</button>
+      <button class="ghost" id="resetBtn">Reset simulation</button>
+      <div class="speed-group">
+        <label for="speedSel">Playback</label>
+        <select id="speedSel">
+          <option value="1100">Slow</option>
+          <option value="650" selected>Normal</option>
+          <option value="320">Fast</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><span class="swatch" style="background:var(--gold)"></span>Coordinator</div>
+      <div class="legend-item"><span class="swatch" style="background:#2A3140;border:1px solid var(--border)"></span>Active node</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--red)"></span>Offline node</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--blue)"></span>ELECTION message</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--green)"></span>OK message</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--gold)"></span>COORDINATOR message</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Event log</h2>
+      <div id="log"></div>
+    </div>
+
+    <div class="panel">
+      <h2>How the election works</h2>
+      <div class="rules">
+        <ol>
+          <li><b>Every node has a unique ID.</b> Higher ID means higher priority for the coordinator role.</li>
+          <li><b>Someone notices the silence.</b> When a node can't reach the coordinator, it starts an election by sending an <b>ELECTION</b> message to every node with a higher ID.</li>
+          <li><b>Higher nodes speak up.</b> Any higher-ID node that's still alive replies <b>OK</b> — meaning "step aside, I'll take it from here" — and starts its own election.</li>
+          <li><b>Silence means victory.</b> If nobody with a higher ID replies, the initiator declares itself coordinator and broadcasts a <b>COORDINATOR</b> message to everyone.</li>
+          <li><b>Comebacks trigger a rematch.</b> A node that rejoins with an ID higher than the current coordinator immediately forces a new election — the biggest ID in the room always bullies its way to the top.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <footer>bully-election-simulator · runs entirely client-side</footer>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const logEl = document.getElementById('log');
+  const coordLabel = document.getElementById('coordLabel');
+  const aliveLabel = document.getElementById('aliveLabel');
+  const busyFlag = document.getElementById('busyFlag');
+  const failCoordBtn = document.getElementById('failCoordBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const speedSel = document.getElementById('speedSel');
+
+  const NODE_IDS = [1,2,3,4,5,6];
+  const NODE_RADIUS = 30;
+  let nodes = [];
+  let messages = [];
+  let coordinatorId = null;
+  let busy = false;
+
+  function duration(){ return parseInt(speedSel.value, 10); }
+
+  function initNodes(){
+    nodes = NODE_IDS.map(id => ({ id, alive: true, isCoordinator: false, electing: false, x:0, y:0 }));
+    coordinatorId = Math.max(...NODE_IDS);
+    nodes.find(n => n.id === coordinatorId).isCoordinator = true;
+  }
+
+  function getNode(id){ return nodes.find(n => n.id === id); }
+
+  function layout(){
+    const w = canvas.width / devicePixelRatio;
+    const h = canvas.height / devicePixelRatio;
+    const cx = w/2, cy = h/2;
+    const r = Math.min(w,h) * 0.36;
+    const n = nodes.length;
+    nodes.forEach((node, i) => {
+      const angle = -Math.PI/2 + i * (2*Math.PI/n);
+      node.x = cx + r*Math.cos(angle);
+      node.y = cy + r*Math.sin(angle);
+    });
+  }
+
+  function resizeCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    layout();
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  const devicePixelRatioSafe = () => window.devicePixelRatio || 1;
+  Object.defineProperty(window, 'devicePixelRatio_unused', {});
+  var devicePixelRatio = devicePixelRatioSafe();
+
+  // ---------- Logging ----------
+  function log(text, type){
+    const time = new Date();
+    const ts = time.toLocaleTimeString('en-GB', {hour12:false}) + '.' + String(time.getMilliseconds()).padStart(3,'0').slice(0,1);
+    const line = document.createElement('div');
+    line.className = 'log-line ' + (type || 'info');
+    line.innerHTML = '<span class="t">[' + ts + ']</span> <span class="m">' + text + '</span>';
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function clearLog(){ logEl.innerHTML = ''; }
+
+  // ---------- Status ----------
+  function updateStatus(){
+    coordLabel.textContent = coordinatorId ? ('Node ' + coordinatorId) : 'none';
+    aliveLabel.textContent = nodes.filter(n=>n.alive).length + ' / ' + nodes.length;
+  }
+
+  function setBusy(v){
+    busy = v;
+    busyFlag.classList.toggle('on', v);
+    failCoordBtn.disabled = v || coordinatorId === null || !nodes.some(n=>n.alive);
+    resetBtn.disabled = v;
+  }
+
+  // ---------- Messaging (drives both the log and the animation) ----------
+  function sendMessage(fromId, toId, type){
+    const from = getNode(fromId), to = getNode(toId);
+    const d = duration();
+    messages.push({ from, to, type, start: performance.now(), duration: d });
+    const arrow = type === 'ELECTION' ? 'election' : (type === 'OK' ? 'ok' : 'coordinator');
+    log('Node ' + fromId + ' &rarr; Node ' + toId + ' : ' + type, arrow);
+    return new Promise(resolve => setTimeout(resolve, d));
+  }
+
+  // ---------- Bully algorithm ----------
+  async function runElection(id){
+    const node = getNode(id);
+    if (!node || !node.alive || node.electing) return;
+    node.electing = true;
+    log('Node ' + id + ' starts an election', 'election');
+
+    const higher = nodes.filter(n => n.id > id && n.alive);
+
+    if (higher.length === 0){
+      await declareCoordinator(id);
+      node.electing = false;
+      return;
+    }
+
+    await Promise.all(higher.map(h => sendMessage(id, h.id, 'ELECTION')));
+    await Promise.all(higher.map(h => sendMessage(h.id, id, 'OK')));
+    log('Node ' + id + ' got a reply from a higher node — stepping aside', 'info');
+
+    higher.forEach(h => { runElection(h.id); });
+    node.electing = false;
+  }
+
+  async function declareCoordinator(id){
+    coordinatorId = id;
+    nodes.forEach(n => { n.isCoordinator = (n.id === id && n.alive); });
+    updateStatus();
+    log('Node ' + id + ' heard nothing back — declares itself COORDINATOR', 'coordinator');
+    const others = nodes.filter(n => n.id !== id && n.alive);
+    await Promise.all(others.map(o => sendMessage(id, o.id, 'COORDINATOR')));
+    updateStatus();
+  }
+
+  // ---------- Interaction ----------
+  async function toggleNode(id){
+    if (busy) return;
+    const node = getNode(id);
+
+    if (node.alive){
+      node.alive = false;
+      node.electing = false;
+      log('Node ' + id + ' goes offline', 'fail');
+
+      if (node.isCoordinator){
+        node.isCoordinator = false;
+        coordinatorId = null;
+        updateStatus();
+        setBusy(true);
+        setTimeout(async () => {
+          const candidates = nodes.filter(n => n.alive).sort((a,b)=>a.id-b.id);
+          if (candidates.length === 0){
+            log('Every node is offline — no coordinator can be elected', 'fail');
+          } else {
+            const detector = candidates[0];
+            log('Node ' + detector.id + ' notices the coordinator is unreachable', 'info');
+            await runElection(detector.id);
+          }
+          setBusy(false);
+        }, 400);
+      } else {
+        updateStatus();
+      }
+    } else {
+      node.alive = true;
+      log('Node ' + id + ' comes back online', 'ok');
+      updateStatus();
+      if (coordinatorId === null || id > coordinatorId){
+        setBusy(true);
+        setTimeout(async () => {
+          log('Node ' + id + ' outranks the current coordinator and calls an election', 'election');
+          await runElection(id);
+          setBusy(false);
+        }, 400);
+      }
+    }
+  }
+
+  failCoordBtn.addEventListener('click', () => {
+    if (busy || coordinatorId === null) return;
+    toggleNode(coordinatorId);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    if (busy) return;
+    initNodes();
+    messages = [];
+    clearLog();
+    updateStatus();
+    setBusy(false);
+    log('Simulation reset — Node ' + coordinatorId + ' is coordinator', 'coordinator');
+  });
+
+  speedSel.addEventListener('change', () => {});
+
+  canvas.addEventListener('click', (evt) => {
+    if (busy) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = evt.clientX - rect.left;
+    const y = evt.clientY - rect.top;
+    for (const node of nodes){
+      const dx = x - node.x, dy = y - node.y;
+      if (Math.sqrt(dx*dx + dy*dy) <= NODE_RADIUS + 6){
+        toggleNode(node.id);
+        break;
+      }
+    }
+  });
+
+  // ---------- Rendering ----------
+  function colorFor(type){
+    if (type === 'ELECTION') return '#4C8DFF';
+    if (type === 'OK') return '#3FBF7F';
+    return '#E7A83C';
+  }
+
+  function drawNode(node){
+    const { x, y, id, alive, isCoordinator, electing } = node;
+
+    if (isCoordinator && alive){
+      ctx.beginPath();
+      ctx.arc(x, y, NODE_RADIUS + 9, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(231,168,60,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    if (electing && alive){
+      ctx.beginPath();
+      ctx.arc(x, y, NODE_RADIUS + 6, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(76,141,255,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(x, y, NODE_RADIUS, 0, Math.PI*2);
+
+    if (!alive){
+      ctx.fillStyle = '#1A1315';
+      ctx.setLineDash([3,3]);
+      ctx.strokeStyle = '#5C332E';
+    } else if (isCoordinator){
+      ctx.fillStyle = 'rgba(231,168,60,0.12)';
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#E7A83C';
+    } else {
+      ctx.fillStyle = '#171B22';
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#3A4152';
+    }
+    ctx.lineWidth = 1.6;
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.font = '600 15px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = alive ? (isCoordinator ? '#F4CE85' : '#E4E7EC') : '#7A5450';
+    ctx.fillText(id, x, y + 1);
+
+    ctx.font = '500 10px "IBM Plex Mono", monospace';
+    if (isCoordinator && alive){
+      ctx.fillStyle = '#E7A83C';
+      ctx.fillText('COORDINATOR', x, y + NODE_RADIUS + 16);
+    } else if (!alive){
+      ctx.fillStyle = '#6B4A47';
+      ctx.fillText('OFFLINE', x, y + NODE_RADIUS + 16);
+    }
+  }
+
+  function drawMessage(msg, now){
+    const t = Math.min(1, (now - msg.start) / msg.duration);
+    const x = msg.from.x + (msg.to.x - msg.from.x) * t;
+    const y = msg.from.y + (msg.to.y - msg.from.y) * t;
+    const color = colorFor(msg.type);
+
+    ctx.beginPath();
+    ctx.moveTo(msg.from.x, msg.from.y);
+    ctx.lineTo(msg.to.x, msg.to.y);
+    ctx.strokeStyle = color + '22';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI*2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function render(){
+    const now = performance.now();
+    const w = canvas.width / devicePixelRatio, h = canvas.height / devicePixelRatio;
+    ctx.clearRect(0, 0, w, h);
+
+    messages = messages.filter(m => (now - m.start) < m.duration + 30);
+
+    nodes.forEach(drawNode);
+    messages.forEach(m => drawMessage(m, now));
+
+    requestAnimationFrame(render);
+  }
+
+  // ---------- Boot ----------
+  initNodes();
+  resizeCanvas();
+  updateStatus();
+  log('Simulation ready — Node ' + coordinatorId + ' is coordinator', 'coordinator');
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
